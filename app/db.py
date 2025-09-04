@@ -1,3 +1,4 @@
+# app/db.py
 from __future__ import annotations
 import os
 from datetime import datetime
@@ -16,14 +17,8 @@ class TicketLog(Base):
     delivery_id: Mapped[str] = mapped_column(String(120), nullable=False)
     ticket_key: Mapped[str] = mapped_column(String(50), nullable=False)
 
-
 def init_db(database_url: str | None):
-    """
-    Initialize DB (SQLite for local dev, RDS later).
-    """
     db_url = database_url or "sqlite:///app/dev.sqlite"
-
-    # Ensure folder exists for SQLite
     if db_url.startswith("sqlite:///"):
         os.makedirs("app", exist_ok=True)
 
@@ -32,11 +27,7 @@ def init_db(database_url: str | None):
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return engine, SessionLocal
 
-
 def log_ticket_creation(session: Session, source_event: str, delivery_id: str, ticket_key: str) -> None:
-    """
-    Insert a record into ticket_logs table.
-    """
     log = TicketLog(
         source_event=source_event,
         delivery_id=delivery_id,
@@ -44,3 +35,4 @@ def log_ticket_creation(session: Session, source_event: str, delivery_id: str, t
     )
     session.add(log)
     session.commit()
+
