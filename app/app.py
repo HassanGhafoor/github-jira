@@ -7,23 +7,31 @@ import logging
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-# load .env locally if present
+# Load .env if present (dev)
 load_dotenv()
 
-# imports from local package
+# local imports
+from .config import Config
+from .extensions import db, migrate
 from .utils.jira import create_jira_ticket
-from .db import init_db, log_ticket_creation
-from .config import get_database_url
 
+# Create app and init extensions
 app = Flask(__name__)
+app.config.from_object(Config)
+
+db.init_app(app)
+migrate.init_app(app, db)
+
+# Register models (so SQLAlchemy knows about them)
+with app.app_context():
+    from . import models  # noqa: F401
+
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Secret from environment (local dev or SSM -> config may set this)
-GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
-
-# Initialize database (RDS via DATABASE_URL or sqlite local fallback)
-engine, SessionLocal = init_db(get_database_url())
+# Secret
+GITHUB_WEBHOOK_SECRET = app.config.get("GITHUB_WEBHOOK_SECRET", "")
 
 def verify_signature(secret: str, body: bytes, signature_header: str) -> bool:
     if not secret or not signature_header or not signature_header.startswith("sha256="):
@@ -75,10 +83,15 @@ def webhook():
             issue_key = create_jira_ticket(summary, description)
             logger.info("Created Jira ticket: %s", issue_key)
 
-            # Log to DB
-            with SessionLocal() as session:
-                delivery_id = request.headers.get("X-GitHub-Delivery", "n/a")
-                log_ticket_creation(session, source_event=event, delivery_id=delivery_id, ticket_key=issue_key)
+            from .models import WebhookLog
+            entry = WebhookLog(
+                source_event=event,
+                delivery_id=request.headers.get("X-GitHub-Delivery", "n/a"),
+                ticket_key=issue_key,
+                payload=description
+            )
+            db.session.add(entry)
+            db.session.commit()
 
             return jsonify({"ok": True, "jira_ticket": issue_key}), 200
 
